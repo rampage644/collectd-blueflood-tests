@@ -1,0 +1,17 @@
+BaseDir     "%(base_dir)s"
+PIDFile     "%(pid_file)s"
+PluginDir   "%(plugin_dir)s"
+TypesDB     "%(types_file)s"
+
+LoadPlugin logfile
+
+<Plugin logfile>
+	LogLevel info
+	File STDOUT
+	Timestamp true
+	PrintSeverity true
+</Plugin>
+
+LoadPlugin cpu
+LoadPlugin load
+LoadPlugin memory
