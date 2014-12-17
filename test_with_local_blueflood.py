@@ -1,9 +1,17 @@
 #!/usr/bin/env python
 
-import collectdconf
+import json
 import pytest
+import SocketServer
 import subprocess
+import threading
 import time
+
+import collectdconf
+import http_server_mock
+
+from twisted.internet import reactor, endpoints
+from twisted.web import server
 
 
 collectd_conf_in = 'collectd.conf.in'
@@ -17,6 +25,11 @@ def run_collectd(conf, wait=TIMEOUT):
     time.sleep(TIMEOUT)
     p.terminate()
     return p.communicate(), p.returncode
+
+def run_collectd_async(conf, cv=None):
+    p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf], 
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return p
 
 
 class TestRunCollectd:
@@ -55,22 +68,52 @@ class TestRunCollectd:
             wfile.write(write_blueflood_template % {
                     'URL': getattr(cls, 'URL', ''),
                     'AuthURL': getattr(cls, 'AuthURL', ''),
-                    'user': 'user',
-                    'password': 'pass',
-                    'tenantid': 'tenant-id',
-                    'ttl': 10,
-                    'interval': 5
+                    'user': getattr(cls, 'user', ''),
+                    'password': getattr(cls, 'password', ''),
+                    'tenantid': getattr(cls, 'tenantid', 'tenantid'),
+                    'ttl': getattr(cls, 'ttl', 10),
+                    'interval': getattr(cls, 'interval', 12)
                 })
 
-    def test_run_collectd(file_collectd_conf):
+    def test_run_collectd(self):
         (out, err), code = run_collectd(collectd_conf)
         assert out != '', out
+        assert 'Exiting normally' in out
         assert err == '', err
         assert code == 0
+
+class TCPServerWithParams(SocketServer.TCPServer):
+
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True, cv=None, data=None):
+        SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass, bind_and_activate)
+        self.cv = cv
+        self.data = data
+
+
 
 class TestRunCollectdLocalMocks(TestRunCollectd):
     URL = 'http://localhost:8000'
     AuthURL = 'http://localhost:8001'
+    user = 'user1'
+    password = 'pass2'
 
+    def test_auth_is_done(self):
+        blueflood_data = ''
+        b_handler = http_server_mock.BluefloodServerHandler()
+        a_handler = http_server_mock.AuthServerHandler()
 
+        endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
+        endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
 
+        t = threading.Thread(target=lambda: reactor.run(installSignalHandlers=0))
+        t.daemon = True
+        t.start()
+
+        p = run_collectd_async(collectd_conf)
+        time.sleep(TIMEOUT)
+        assert len(a_handler.data) == 1, a_handler.data
+        auth_data = json.loads(a_handler.data[0])
+        assert auth_data['auth']['RAX-KSKEY:apiKeyCredentials'] == {'username': self.user, 'apiKey': self.password}
+        p.terminate()
+        p.wait()
+        assert p.returncode == 0
