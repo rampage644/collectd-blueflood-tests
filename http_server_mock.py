@@ -22,11 +22,10 @@ class BluefloodServerHandler(resource.Resource):
         return self.response
 
     def render_POST(self, request):
-        import threading
-        self.data += [request.content.read()]
         request.setHeader('Content-type', 'application/json')
         if self.cv:
             with self.cv:
+                self.data += [request.content.read()]
                 self.cv.notify()
         return ''
 
