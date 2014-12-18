@@ -27,8 +27,7 @@ def run_collectd(conf, wait=TIMEOUT):
     return p.communicate(), p.returncode
 
 def run_collectd_async(conf, cv=None):
-    p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf], 
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf])
     return p
 
 
@@ -80,16 +79,7 @@ class TestRunCollectd:
         (out, err), code = run_collectd(collectd_conf)
         assert out != '', out
         assert 'Exiting normally' in out
-        assert err == '', err
         assert code == 0
-
-class TCPServerWithParams(SocketServer.TCPServer):
-
-    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True, cv=None, data=None):
-        SocketServer.TCPServer.__init__(self, server_address, RequestHandlerClass, bind_and_activate)
-        self.cv = cv
-        self.data = data
-
 
 
 class TestRunCollectdLocalMocks(TestRunCollectd):
@@ -127,7 +117,6 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
             # wait for postdata from blueflood mock
             bcv.wait()
         assert len(b_handler.data) == 1, b_handler.data
-        print b_handler.data
         assert 'X-Auth-Token'.lower() in b_handler.data[0][1]
         assert b_handler.data[0][1]['X-Auth-Token'.lower()] == json.loads(self.response)['access']['token']['id']
         blueflood_data = json.loads(b_handler.data[0][2])
@@ -148,4 +137,6 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
         assert len(b_handler.data) == 1
         # we've done
         p.terminate()
+        print 'Waiting process to terminate'
+        p.wait()
         assert p.returncode == 0
