@@ -98,22 +98,47 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
     password = 'pass2'
 
     def test_auth_is_done(self):
+        acv = threading.Condition()
+        bcv = threading.Condition()
         blueflood_data = ''
-        b_handler = http_server_mock.BluefloodServerHandler()
-        a_handler = http_server_mock.AuthServerHandler()
+        b_handler = http_server_mock.BluefloodServerHandler(bcv)
+        a_handler = http_server_mock.AuthServerHandler(acv)
 
         endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
         endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
 
-        t = threading.Thread(target=lambda: reactor.run(installSignalHandlers=0))
+        t = threading.Thread(target=reactor.run, args=(0, ))
         t.daemon = True
         t.start()
 
         p = run_collectd_async(collectd_conf)
-        time.sleep(TIMEOUT)
+        with acv:
+            # wait for auth request
+            acv.wait()
         assert len(a_handler.data) == 1, a_handler.data
         auth_data = json.loads(a_handler.data[0])
         assert auth_data['auth']['RAX-KSKEY:apiKeyCredentials'] == {'username': self.user, 'apiKey': self.password}
+        with bcv:
+            # wait for postdata from blueflood mock
+            bcv.wait()
+        assert len(b_handler.data) == 1, b_handler.data
+        blueflood_data = json.loads(b_handler.data[0])
+        assert type(blueflood_data) == list
+        for element in blueflood_data:
+            assert type(element) == dict
+            assert 'collectionTime' in element
+            assert type(element['collectionTime']) == int
+            assert 'ttlInSeconds' in element
+            assert type(element['ttlInSeconds']) == int
+            assert 'metricValue' in element
+            assert type(element['metricValue']) in (int, float)
+            assert 'metricName' in element
+            assert type(element['metricName']) in (str, unicode, bytes)
+
+        # sanity checks
+        assert len(a_handler.data) == 1
+        assert len(b_handler.data) == 1
+        # we've done
         p.terminate()
-        p.wait()
+        print p.communicate()
         assert p.returncode == 0
