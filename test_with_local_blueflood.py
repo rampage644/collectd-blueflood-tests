@@ -49,10 +49,11 @@ class TestRunCollectd:
 <Plugin write_blueflood>
     <URL "%(URL)s">
         TenantId    "%(tenantid)s"
-        User        "%(user)s"
-        Password    "%(password)s"
-        AuthURL     "%(AuthURL)s"
         ttlInSeconds %(ttl)d
+        <AuthURL     "%(AuthURL)s">
+            User        "%(user)s"
+            Password    "%(password)s"
+        </AuthURL>
     </URL>
 </Plugin>
 '''
@@ -127,8 +128,8 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
             bcv.wait()
         assert len(b_handler.data) == 1, b_handler.data
         print b_handler.data
-        assert 'X-Auth-Token' in b_handler.data[0][1]
-        assert b_handler.data[0][1]['X-Auth-Token'] == json.loads(response)['access']['token']['id']
+        assert 'X-Auth-Token'.lower() in b_handler.data[0][1]
+        assert b_handler.data[0][1]['X-Auth-Token'.lower()] == json.loads(self.response)['access']['token']['id']
         blueflood_data = json.loads(b_handler.data[0][2])
         assert type(blueflood_data) == list
         for element in blueflood_data:
@@ -147,5 +148,4 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
         assert len(b_handler.data) == 1
         # we've done
         p.terminate()
-        print p.communicate()
         assert p.returncode == 0
