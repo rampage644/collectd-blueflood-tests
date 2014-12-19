@@ -200,14 +200,14 @@ class TestRunWithBluefloodNoAuth(TestRunCollectd):
             server = BluefloodEndpoint()
             server.tenant = self.tenantid
 
-            resp = server.retrieve(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
-            count_before = resp['values'][0]['numPoints']
+            resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
+            count_before = len(resp['values'])
 
             # wait for some time for collectd to write data to Blueflood
             time.sleep(15)
         
-            resp = server.retrieve(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
-            count_after = resp['values'][0]['numPoints']
+            resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
+            count_after = len(resp['values'][0])
             assert count_after > count_before, resp
             assert count_after != 0
 
