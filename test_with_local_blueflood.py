@@ -174,3 +174,53 @@ class TestRunWithBluefloodNoAuth(TestRunCollectd):
         p.wait()
         assert p.returncode == 0
 
+class TestMockBluefloodNoAuth(TestRunCollectd):
+    URL = 'http://localhost:8000'
+    AuthURL = ''
+    tenantid = 'tenant-id'
+
+    def test_data_arrives(self):
+        cv = threading.Condition()
+        # blueflood server mock
+        handler = http_server_mock.MockServerHandler(cv)
+
+        endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(handler))
+
+        t = threading.Thread(target=reactor.run, args=(0, ))
+        t.daemon = True
+        t.start()
+
+        p = run_collectd_async(collectd_conf)
+        with cv:
+            # wait for auth request
+            cv.wait()
+
+        assert len(handler.data) == 1
+        assert 'X-Auth-Token'.lower() not in handler.data[0][1]
+        assert handler.data[0][2] == '/v2.0/' + self.tenantid + '/ingest'
+        blueflood_data = json.loads(handler.data[0][3])
+        assert type(blueflood_data) == list
+        for element in blueflood_data:
+            assert type(element) == dict
+            assert 'collectionTime' in element
+            assert type(element['collectionTime']) == int
+            assert 'ttlInSeconds' in element
+            assert type(element['ttlInSeconds']) == int
+            assert 'metricValue' in element
+            assert type(element['metricValue']) in (int, float)
+            assert 'metricName' in element
+            assert type(element['metricName']) in (str, unicode, bytes)
+
+        # we've done
+        p.terminate()
+        p.wait()
+        assert p.returncode == 0
+
+class TestBluefloodWithAuth(TestRunCollectd):
+    URL = collectdconf.rax_url
+    AuthURL = collectdconf.rax_auth_url
+    user = collectdconf.rax_user
+    password = collectdconf.rax_key
+
+    def test_blueflood_ingest(self):
+        assert False
