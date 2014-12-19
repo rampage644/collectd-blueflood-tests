@@ -11,3 +11,8 @@ collectd_pid_file = os.path.join(collectd_dir, 'collectd.pid')
 collectd_types_file = os.path.join(collectd_dir, 'share', 'collectd', 'types.db')
 
 test_metric_name = '.'.join(['thinkpad430s', 'load', 'load', 'shortterm'])
+
+rax_url = 'https://global.metrics-ingest.api.rackspacecloud.com'
+rax_auth_url = 'https://identity.api.rackspacecloud.com/v2.0/tokens'
+rax_user = ''
+rax_key = ''
