@@ -75,6 +75,9 @@ class TestRunCollectd:
                     'interval': getattr(cls, 'interval', 12)
                 })
 
+
+class TestJustRun(TestRunCollectd):
+
     def test_run_collectd(self):
         (out, err), code = run_collectd(collectd_conf)
         assert out != '', out
@@ -110,16 +113,18 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
         with acv:
             # wait for auth request
             acv.wait()
+        assert len(b_handler.data) == 0
         assert len(a_handler.data) == 1, a_handler.data
-        auth_data = json.loads(a_handler.data[0][2])
-        assert auth_data['auth']['RAX-KSKEY:apiKeyCredentials'] == {'username': self.user, 'apiKey': self.password}
+        auth_data = json.loads(a_handler.data[0][3])
+        assert auth_data['auth']['RAX-KSKEY:apiKeyCredentials'] == {'username': self.user, 'apiKey': self.password}, auth_data
         with bcv:
             # wait for postdata from blueflood mock
             bcv.wait()
         assert len(b_handler.data) == 1, b_handler.data
         assert 'X-Auth-Token'.lower() in b_handler.data[0][1]
         assert b_handler.data[0][1]['X-Auth-Token'.lower()] == json.loads(self.response)['access']['token']['id']
-        blueflood_data = json.loads(b_handler.data[0][2])
+        assert b_handler.data[0][2] == '/v2.0/' + json.loads(self.response)['access']['token']['tenant']['id'] + '/ingest'
+        blueflood_data = json.loads(b_handler.data[0][3])
         assert type(blueflood_data) == list
         for element in blueflood_data:
             assert type(element) == dict

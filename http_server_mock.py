@@ -24,9 +24,13 @@ class MockServerHandler(resource.Resource):
 
     def render_POST(self, request):
         request.setHeader('Content-type', 'application/json')
+        # print request.path
+        # print dict(request.received_headers)
+        # print request.content.read()
+        # print ''
         if self.cv:
             with self.cv:
-                self.data += [(time.time(), dict(request.received_headers), request.content.read())]
+                self.data += [(time.time(), dict(request.received_headers), request.path, request.content.read())]
                 self.cv.notify()
         return self.response
 
