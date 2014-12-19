@@ -9,3 +9,5 @@ collectd_plugin_dir = os.path.join(collectd_dir, 'src', '.libs')
 collectd_base_dir = os.path.join(collectd_dir, 'var')
 collectd_pid_file = os.path.join(collectd_dir, 'collectd.pid')
 collectd_types_file = os.path.join(collectd_dir, 'share', 'collectd', 'types.db')
+
+test_metric_name = '.'.join(['thinkpad430s', 'load', 'load', 'shortterm'])

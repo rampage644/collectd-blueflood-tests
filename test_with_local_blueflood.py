@@ -7,6 +7,8 @@ import subprocess
 import threading
 import time
 
+from blueflood_python.blueflood import BluefloodEndpoint
+
 import collectdconf
 import http_server_mock
 
@@ -70,9 +72,9 @@ class TestRunCollectd:
                     'AuthURL': getattr(cls, 'AuthURL', ''),
                     'user': getattr(cls, 'user', ''),
                     'password': getattr(cls, 'password', ''),
-                    'tenantid': getattr(cls, 'tenantid', 'tenantid'),
-                    'ttl': getattr(cls, 'ttl', 10),
-                    'interval': getattr(cls, 'interval', 12)
+                    'tenantid': getattr(cls, 'tenantid', 'tenant-id'),
+                    'ttl': getattr(cls, 'ttl', 600),
+                    'interval': getattr(cls, 'interval', 5)
                 })
 
 
@@ -145,3 +147,30 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
         print 'Waiting process to terminate'
         p.wait()
         assert p.returncode == 0
+
+
+class TestRunWithBluefloodNoAuth(TestRunCollectd):
+    URL = 'http://localhost:19000'
+    AuthURL = ''
+    tenantid = 'tenant-id'
+
+    def test_blueflood_ingest(self):
+        p = run_collectd_async(collectd_conf)
+        server = BluefloodEndpoint()
+        server.tenant = self.tenantid
+
+        resp = server.retrieve(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
+        count_before = resp['values'][0]['numPoints']
+
+        # wait for some time for collectd to write data to Blueflood
+        time.sleep(15)
+        
+        resp = server.retrieve(collectdconf.test_metric_name, 0, int(time.time()*1000), 100)
+        count_after = resp['values'][0]['numPoints']
+        assert count_after > count_before, resp
+        assert count_after != 0
+
+        p.terminate()
+        p.wait()
+        assert p.returncode == 0
+
