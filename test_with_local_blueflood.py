@@ -306,8 +306,7 @@ class TestBluefloodReauth(TestRunCollectd):
 
         cv = threading.Condition()
         # blueflood server mock
-        handler = reb_handler
-        handler.cv = cv
+        a_handler.cv = cv
 
         p = run_collectd_async(collectd_conf)
         try:
@@ -316,29 +315,14 @@ class TestBluefloodReauth(TestRunCollectd):
                 cv.wait()
             # assert auth server hit
             assert len(a_handler.data) == 1
-            assert len(handler.data) == 1
 
             print 'Waiting #2'
             with cv:
                 cv.wait()
             # assert auth server wasn't hit yet
-            assert len(a_handler.data) == 1
-            assert len(handler.data) == 2
-
-            print 'Waiting #3'
-            with cv:
-                cv.wait()
-            # assert auth server still wasn't hit
-            assert len(a_handler.data) == 1
-            # blueflood should response with 401 now
-            assert len(handler.data) == 3
-
-            print 'Waiting #4'
-            with cv:
-                cv.wait()
-            # assert auth server was hot twice
             assert len(a_handler.data) == 2
-            assert len(handler.data) == 4
+            assert len(reb_handler.data) == 3
+
         finally:
             # we've done
             p.terminate()
