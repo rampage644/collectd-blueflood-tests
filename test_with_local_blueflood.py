@@ -47,18 +47,22 @@ def authenticate(url, user, key):
 t = None 
 b_handler = None
 a_handler = None
+reb_handler = None
 
 def setup_module(module):
     """ setup any state specific to the execution of the given module."""
     
-    global b_handler, a_handler, t
+    global b_handler, a_handler, reb_handler, t
     # blueflood server mock
     b_handler = http_server_mock.MockServerHandler()
     # auth server mock
     a_handler = http_server_mock.MockServerHandler()
+    # blueflood mock sending 401 responses (for _re_auth scenario testing)
+    reb_handler = http_server_mock.Mock401ServerHandler()
 
     endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
+    endpoints.serverFromString(reactor, "tcp:8002").listen(server.Site(reb_handler))
 
     t = threading.Thread(target=reactor.run, args=(0, ))
     t.daemon = True
@@ -68,7 +72,7 @@ def teardown_module(module):
     """ teardown any state that was previously setup with a setup_module
     method.
     """
-    global b_handler, a_handler, t
+    global b_handler, a_handler, reb_handler, t
 
     reactor.stop()
     t = None
@@ -120,6 +124,7 @@ class TestRunCollectd:
 
         a_handler.data = []
         b_handler.data = []
+        reb_handler.data = []
 
 
 class TestJustRun(TestRunCollectd):
@@ -285,6 +290,57 @@ class TestBluefloodWithAuth(TestRunCollectd):
             assert count_after > count_before, resp
             assert count_after != 0
         finally:
+            p.terminate()
+            print 'Waiting for collectd to terminate'
+            p.wait()
+            assert p.returncode == 0
+
+class TestBluefloodReauth(TestRunCollectd):
+    URL = 'http://localhost:8002'
+    AuthURL = 'http://localhost:8001'
+    response = """{"access":{"token":{"id":"eb5e1d9287054898a55439137ea68675","expires":"2014-12-14T22:54:49.574Z","tenant":{"id":"836986","name":"836986"},"RAX-AUTH:authenticatedBy":["APIKEY"]},"serviceCatalog":[{"name":"cloudBlockStorage","endpoints":[{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.blockstorage.api.rackspacecloud.com\\/v1\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.blockstorage.api.rackspacecloud.com\\/v1\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.blockstorage.api.rackspacecloud.com\\/v1\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.blockstorage.api.rackspacecloud.com\\/v1\\/836986"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.blockstorage.api.rackspacecloud.com\\/v1\\/836986"}],"type":"volume"},{"name":"cloudImages","endpoints":[{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.images.api.rackspacecloud.com\\/v2"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.images.api.rackspacecloud.com\\/v2"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.images.api.rackspacecloud.com\\/v2"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.images.api.rackspacecloud.com\\/v2"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.images.api.rackspacecloud.com\\/v2"}],"type":"image"},{"name":"cloudQueues","endpoints":[{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.queues.api.rackspacecloud.com\\/v1\\/836986","internalURL":"https:\\/\\/snet-hkg.queues.api.rackspacecloud.com\\/v1\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.queues.api.rackspacecloud.com\\/v1\\/836986","internalURL":"https:\\/\\/snet-ord.queues.api.rackspacecloud.com\\/v1\\/836986"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.queues.api.rackspacecloud.com\\/v1\\/836986","internalURL":"https:\\/\\/snet-syd.queues.api.rackspacecloud.com\\/v1\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.queues.api.rackspacecloud.com\\/v1\\/836986","internalURL":"https:\\/\\/snet-dfw.queues.api.rackspacecloud.com\\/v1\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.queues.api.rackspacecloud.com\\/v1\\/836986","internalURL":"https:\\/\\/snet-iad.queues.api.rackspacecloud.com\\/v1\\/836986"}],"type":"rax:queues"},{"name":"cloudBigData","endpoints":[{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.bigdata.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.bigdata.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.bigdata.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:bigdata"},{"name":"cloudOrchestration","endpoints":[{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.orchestration.api.rackspacecloud.com\\/v1\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.orchestration.api.rackspacecloud.com\\/v1\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.orchestration.api.rackspacecloud.com\\/v1\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.orchestration.api.rackspacecloud.com\\/v1\\/836986"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.orchestration.api.rackspacecloud.com\\/v1\\/836986"}],"type":"orchestration"},{"name":"cloudServersOpenStack","endpoints":[{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.servers.api.rackspacecloud.com\\/v2\\/836986","versionInfo":"https:\\/\\/syd.servers.api.rackspacecloud.com\\/v2","versionList":"https:\\/\\/syd.servers.api.rackspacecloud.com\\/","versionId":"2"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.servers.api.rackspacecloud.com\\/v2\\/836986","versionInfo":"https:\\/\\/dfw.servers.api.rackspacecloud.com\\/v2","versionList":"https:\\/\\/dfw.servers.api.rackspacecloud.com\\/","versionId":"2"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.servers.api.rackspacecloud.com\\/v2\\/836986","versionInfo":"https:\\/\\/iad.servers.api.rackspacecloud.com\\/v2","versionList":"https:\\/\\/iad.servers.api.rackspacecloud.com\\/","versionId":"2"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.servers.api.rackspacecloud.com\\/v2\\/836986","versionInfo":"https:\\/\\/hkg.servers.api.rackspacecloud.com\\/v2","versionList":"https:\\/\\/hkg.servers.api.rackspacecloud.com\\/","versionId":"2"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.servers.api.rackspacecloud.com\\/v2\\/836986","versionInfo":"https:\\/\\/ord.servers.api.rackspacecloud.com\\/v2","versionList":"https:\\/\\/ord.servers.api.rackspacecloud.com\\/","versionId":"2"}],"type":"compute"},{"name":"autoscale","endpoints":[{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.autoscale.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.autoscale.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.autoscale.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.autoscale.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.autoscale.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:autoscale"},{"name":"cloudDatabases","endpoints":[{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.databases.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.databases.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.databases.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.databases.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.databases.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:database"},{"name":"cloudBackup","endpoints":[{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.backup.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.backup.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.backup.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.backup.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.backup.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:backup"},{"name":"cloudMetrics","endpoints":[{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/global.metrics.api.rackspacecloud.com\\/v2.0\\/836986"}],"type":"rax:cloudmetrics"},{"name":"cloudLoadBalancers","endpoints":[{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.loadbalancers.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.loadbalancers.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.loadbalancers.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.loadbalancers.api.rackspacecloud.com\\/v1.0\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.loadbalancers.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:load-balancer"},{"name":"cloudMetricsIngest","endpoints":[{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/global.metrics-ingest.api.rackspacecloud.com\\/v2.0\\/836986"}],"type":"rax:cloudmetrics"},{"name":"cloudNetworks","endpoints":[{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.networks.api.rackspacecloud.com\\/v2.0"}],"type":"network"},{"name":"cloudFeeds","endpoints":[{"region":"HKG","tenantId":"836986","publicURL":"https:\\/\\/hkg.feeds.api.rackspacecloud.com\\/836986","internalURL":"https:\\/\\/atom.prod.hkg1.us.ci.rackspace.net\\/836986"},{"region":"SYD","tenantId":"836986","publicURL":"https:\\/\\/syd.feeds.api.rackspacecloud.com\\/836986","internalURL":"https:\\/\\/atom.prod.syd2.us.ci.rackspace.net\\/836986"},{"region":"IAD","tenantId":"836986","publicURL":"https:\\/\\/iad.feeds.api.rackspacecloud.com\\/836986","internalURL":"https:\\/\\/atom.prod.iad3.us.ci.rackspace.net\\/836986"},{"region":"DFW","tenantId":"836986","publicURL":"https:\\/\\/dfw.feeds.api.rackspacecloud.com\\/836986","internalURL":"https:\\/\\/atom.prod.dfw1.us.ci.rackspace.net\\/836986"},{"region":"ORD","tenantId":"836986","publicURL":"https:\\/\\/ord.feeds.api.rackspacecloud.com\\/836986","internalURL":"https:\\/\\/atom.prod.ord1.us.ci.rackspace.net\\/836986"}],"type":"rax:feeds"},{"name":"cloudMonitoring","endpoints":[{"tenantId":"836986","publicURL":"https:\\/\\/monitoring.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:monitor"},{"name":"cloudDNS","endpoints":[{"tenantId":"836986","publicURL":"https:\\/\\/dns.api.rackspacecloud.com\\/v1.0\\/836986"}],"type":"rax:dns"},{"name":"cloudFilesCDN","endpoints":[{"region":"ORD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/cdn2.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"SYD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/cdn4.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"DFW","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/cdn1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"HKG","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/cdn6.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"IAD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/cdn5.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"}],"type":"rax:object-cdn"},{"name":"cloudFiles","endpoints":[{"region":"ORD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/storage101.ord1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","internalURL":"https:\\/\\/snet-storage101.ord1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"SYD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/storage101.syd2.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","internalURL":"https:\\/\\/snet-storage101.syd2.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"DFW","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/storage101.dfw1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","internalURL":"https:\\/\\/snet-storage101.dfw1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"IAD","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/storage101.iad3.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","internalURL":"https:\\/\\/snet-storage101.iad3.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"},{"region":"HKG","tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","publicURL":"https:\\/\\/storage101.hkg1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","internalURL":"https:\\/\\/snet-storage101.hkg1.clouddrive.com\\/v1\\/MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001"}],"type":"object-store"}],"user":{"id":"10040551","roles":[{"id":"10000351","description":"Creator role for Cloud Metrics access","name":"cloudmetrics:creator"},{"id":"3","description":"User Admin Role.","name":"identity:user-admin"},{"tenantId":"MossoCloudFS_3d820fe1-52a8-4315-b1de-67f4bfff3001","id":"5","description":"A Role that allows a user access to keystone Service methods","name":"object-store:default"},{"tenantId":"836986","id":"6","description":"A Role that allows a user access to keystone Service methods","name":"compute:default"},{"id":"10000150","description":"Checkmate Access role","name":"checkmate"}],"name":"bf0testenv1","RAX-AUTH:defaultRegion":"ORD"}}}"""
+
+    def test_reauth(self):
+        global reb_handler, a_handler
+        a_handler.response = self.response
+
+        cv = threading.Condition()
+        # blueflood server mock
+        handler = reb_handler
+        handler.cv = cv
+
+        p = run_collectd_async(collectd_conf)
+        try:
+            print 'Waiting #1'
+            with cv:
+                cv.wait()
+            # assert auth server hit
+            assert len(a_handler.data) == 1
+            assert len(handler.data) == 1
+
+            print 'Waiting #2'
+            with cv:
+                cv.wait()
+            # assert auth server wasn't hit yet
+            assert len(a_handler.data) == 1
+            assert len(handler.data) == 2
+
+            print 'Waiting #3'
+            with cv:
+                cv.wait()
+            # assert auth server still wasn't hit
+            assert len(a_handler.data) == 1
+            # blueflood should response with 401 now
+            assert len(handler.data) == 3
+
+            print 'Waiting #4'
+            with cv:
+                cv.wait()
+            # assert auth server was hot twice
+            assert len(a_handler.data) == 2
+            assert len(handler.data) == 4
+        finally:
+            # we've done
             p.terminate()
             print 'Waiting for collectd to terminate'
             p.wait()
