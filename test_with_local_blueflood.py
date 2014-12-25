@@ -80,6 +80,7 @@ def teardown_module(module):
 class TestRunCollectd:
     URL = ''
     AuthURL = ''
+    interval = 5
 
     @classmethod
     def setup_class(cls):
@@ -126,6 +127,27 @@ class TestRunCollectd:
         b_handler.data = []
         reb_handler.data = []
 
+@pytest.fixture
+def collectd(request):
+    p = run_collectd_async(collectd_conf)
+    def fin():
+        p.terminate()
+        print 'Waiting process to terminate'
+        p.wait()
+        assert p.returncode == 0
+    request.addfinalizer(fin)
+    return p
+
+@pytest.fixture
+def blueflood_handler_cv(request):
+    global b_handler
+    cv = threading.Condition()
+    b_handler.cv = cv
+    def fin():
+        b_handler.cv = None
+    request.addfinalizer(fin)
+    return cv
+
 
 class TestJustRun(TestRunCollectd):
 
@@ -156,6 +178,7 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
 
         p = run_collectd_async(collectd_conf)
         try:
+            print 'Waiting for auth post'
             with acv:
                 # wait for auth request
                 acv.wait()
@@ -163,6 +186,7 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
             assert len(a_handler.data) == 1, a_handler.data
             auth_data = json.loads(a_handler.data[0][3])
             assert auth_data['auth']['RAX-KSKEY:apiKeyCredentials'] == {'username': self.user, 'apiKey': self.password}, auth_data
+            print 'Waiting for blue post'
             with bcv:
                 # wait for postdata from blueflood mock
                 bcv.wait()
@@ -193,13 +217,12 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
             p.wait()
             assert p.returncode == 0
 
-
 class TestRunWithBluefloodNoAuth(TestRunCollectd):
     URL = 'http://localhost:19000'
     AuthURL = ''
     tenantid = 'tenant-id'
 
-    def test_blueflood_ingest(self):
+    def test_blueflood_ingest(self, ):
         p = run_collectd_async(collectd_conf)
         try:
             server = BluefloodEndpoint()
@@ -227,41 +250,36 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
     AuthURL = ''
     tenantid = 'tenant-id'
 
-    def test_data_arrives(self):
-        global b_handler, a_handler, t
+    def test_data_arrives(self, blueflood_handler_cv, collectd):
+        global b_handler
 
-        cv = threading.Condition()
+        cv = blueflood_handler_cv
         # blueflood server mock
         handler = b_handler
-        handler.cv = cv
 
-        p = run_collectd_async(collectd_conf)
-        try:
-            with cv:
-                # wait for auth request
-                cv.wait()
+        with cv:
+            cv.wait(self.interval * 2)
 
-            assert len(handler.data) == 1
-            assert 'X-Auth-Token'.lower() not in handler.data[0][1]
-            assert handler.data[0][2] == '/v2.0/' + self.tenantid + '/ingest'
-            blueflood_data = json.loads(handler.data[0][3])
-            assert type(blueflood_data) == list
-            for element in blueflood_data:
-                assert type(element) == dict
-                assert 'collectionTime' in element
-                assert type(element['collectionTime']) == int
-                assert 'ttlInSeconds' in element
-                assert type(element['ttlInSeconds']) == int
-                assert 'metricValue' in element
-                assert type(element['metricValue']) in (int, float)
-                assert 'metricName' in element
-                assert type(element['metricName']) in (str, unicode, bytes)
-        finally:
-            # we've done
-            p.terminate()
-            print 'Waiting for collectd to terminate'
-            p.wait()
-            assert p.returncode == 0
+        assert len(handler.data) == 1
+        assert 'X-Auth-Token'.lower() not in handler.data[0][1]
+        assert handler.data[0][2] == '/v2.0/' + self.tenantid + '/ingest'
+        print handler.data
+        blueflood_data = json.loads(handler.data[0][3])
+        assert type(blueflood_data) == list
+        for element in blueflood_data:
+            assert type(element) == dict
+            assert 'collectionTime' in element
+            assert type(element['collectionTime']) == int
+            assert 'ttlInSeconds' in element
+            assert type(element['ttlInSeconds']) == int
+            assert 'metricValue' in element
+            assert type(element['metricValue']) in (int, float)
+            assert 'metricName' in element
+            assert type(element['metricName']) in (str, unicode, bytes)
+
+    def test_data_arrival_interval(self):
+        assert True
+
 
 class TestBluefloodWithAuth(TestRunCollectd):
     URL = collectdconf.rax_url
@@ -329,3 +347,4 @@ class TestBluefloodReauth(TestRunCollectd):
             print 'Waiting for collectd to terminate'
             p.wait()
             assert p.returncode == 0
+
