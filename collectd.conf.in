@@ -4,6 +4,7 @@ PluginDir   "%(plugin_dir)s"
 TypesDB     "%(types_file)s"
 
 LoadPlugin logfile
+Interval 5
 
 <Plugin logfile>
 	LogLevel info

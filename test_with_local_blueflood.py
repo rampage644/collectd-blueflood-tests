@@ -256,6 +256,7 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
     URL = 'http://localhost:8000'
     AuthURL = ''
     tenantid = 'tenant-id'
+    interval = 5
 
     def test_data_arrives(self, blueflood_handler, collectd):
         cv = blueflood_handler.cv
@@ -299,7 +300,7 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
         for index in range(2, len(handler.data)):
             time = handler.data[index][0]
             print prev_time, time, (time - prev_time), 
-            assert (time - prev_time - self.interval) < float(self.interval) * 0.01
+            assert float(self.interval) * (1 - 0.01) < abs(time - prev_time) < float(self.interval) * (1 + 0.01)
             prev_time = time
 
 class TestErrorBluefloodNoAuth(TestRunCollectd):
