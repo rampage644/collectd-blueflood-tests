@@ -46,23 +46,28 @@ def authenticate(url, user, key):
 
 t = None 
 b_handler = None
+b_endpoint = None
 a_handler = None
 reb_handler = None
+error_handler = None
 
 def setup_module(module):
     """ setup any state specific to the execution of the given module."""
     
-    global b_handler, a_handler, reb_handler, t
+    global b_handler, b_endpoint, a_handler, reb_handler, err_handler, t
     # blueflood server mock
     b_handler = http_server_mock.MockServerHandler()
     # auth server mock
     a_handler = http_server_mock.MockServerHandler()
     # blueflood mock sending 401 responses (for _re_auth scenario testing)
     reb_handler = http_server_mock.Mock401ServerHandler()
+    # blueflood handler sending 500 responses
+    err_handler = http_server_mock.Mock500ServerHandler()
 
-    endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
+    b_endpoint = endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
     endpoints.serverFromString(reactor, "tcp:8002").listen(server.Site(reb_handler))
+    endpoints.serverFromString(reactor, "tcp:8003").listen(server.Site(err_handler))
 
     t = threading.Thread(target=reactor.run, args=(0, ))
     t.daemon = True
@@ -80,7 +85,7 @@ def teardown_module(module):
 class TestRunCollectd:
     URL = ''
     AuthURL = ''
-    interval = 5
+    interval = 10
 
     @classmethod
     def setup_class(cls):
@@ -167,6 +172,17 @@ def auth_handler(request):
         a_handler.data = []
     request.addfinalizer(fin)
     return a_handler
+
+@pytest.fixture
+def error_handler(request):
+    global err_handler
+    cv = threading.Condition()
+    err_handler.cv = cv
+    def fin():
+        err_handler.cv = None
+        err_handler.data = []
+    request.addfinalizer(fin)
+    return err_handler
 
 
 class TestRunCollectdLocalMocks(TestRunCollectd):
@@ -285,8 +301,57 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
             print prev_time, time, (time - prev_time), 
             assert (time - prev_time - self.interval) < float(self.interval) * 0.01
             prev_time = time
-        
 
+class TestErrorBluefloodNoAuth(TestRunCollectd):
+    URL = 'http://localhost:8000'
+    AuthURL = 'http://localhost:8004'
+    tenantid = 'tenant-id'
+
+    def _parse_data_into_metrics(self, data):
+        """
+        return dict {key:metric name, value: [time1, time2, timeN] }
+        """
+        return_dict = {}
+        series = json.loads(data)
+        for metric in series:
+            times = return_dict.get(metric['metricName'], [])
+            times.append(metric['collectionTime'])
+            return_dict[metric['metricName']] = times
+        return return_dict
+
+    def test_error_response(self, blueflood_handler, collectd):
+        global b_endpoint
+
+        cv = blueflood_handler.cv
+
+        with cv:
+            print 'First wait'
+            cv.wait(self.interval * 2)
+        # now stop server to make sure write_blueflood plugin fails with delivery
+        print 'stoppping'
+        b_endpoint.stopListening()
+        # wait for next data send
+        print 'sleeping'
+        time.sleep(self.interval)
+        # start listening again
+        print 'start again'
+        b_endpoint = endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
+        # wait again
+        with cv:
+            print 'Second wait'
+            cv.wait(self.interval * 2)
+
+        first_data = self._parse_data_into_metrics(blueflood_handler.data[0][3])
+        second_data = self._parse_data_into_metrics(blueflood_handler.data[1][3])
+        # assert first_data times are in second_data too
+        keys1 = set(first_data.keys())
+        keys2 = set(second_data.keys())
+        # select random key
+        key = (keys1 & keys2).pop()
+        for time in first_data[key]:
+            assert time in set(second_data[key])
+        assert False
+        
 
 class TestBluefloodWithAuth(TestRunCollectd):
     URL = collectdconf.rax_url

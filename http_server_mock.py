@@ -24,11 +24,11 @@ class MockServerHandler(resource.Resource):
 
     def render_POST(self, request):
         request.setHeader('Content-type', 'application/json')
-        # print request.path, self
-        # print dict(request.received_headers)
+        print request.path, self
+        print dict(request.received_headers)
         data = request.content.read()
-        # print len(data), data
-        # print ''
+        print len(data)
+        print ''
         if self.cv:
             with self.cv:
                 self.data += [(time.time(), dict(request.received_headers), request.path, data)]
@@ -54,10 +54,11 @@ class Mock401ServerHandler(MockServerHandler):
         request.setResponseCode(code)
         return resp
 
-class Mock500ServerHandler(MockServerHandler):
+class Mock500ServerHandler(Mock401ServerHandler):
     def render_POST(self, request):
         resp = MockServerHandler.render_POST(self, request)
-        request.setResponseCode(500)
+        resp = resp if self.count % self.frequency else ''
+        self.count += 1
         return resp
 
 if __name__ == '__main__':
