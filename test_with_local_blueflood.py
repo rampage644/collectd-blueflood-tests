@@ -325,41 +325,35 @@ class TestErrorBluefloodNoAuth(TestRunCollectd):
 
     def test_error_response(self, blueflood_handler, collectd):
         global b_endpoint, b_handler_port
-
         cv = blueflood_handler.cv
 
-        with cv:
-            print 'First wait'
-            cv.wait(self.interval * 2)
-        # now stop server to make sure write_blueflood plugin fails with delivery
-        assert len(blueflood_handler.data) == 1
-        first_POST_data = blueflood_handler.data[0][3]
+        # we start by disabling data ingestion. Idea is that after we enable it
+        # again we should recieve all data including data from this specific
+        # interval
+        not_recieve_data_start_time = int(time.time())
+        # stop listening right now
         b_handler_port.stopListening()
-        pytest.set_trace()
-        # wait for next data send
+        # wait for some time
         time.sleep(self.interval * 2)
         # start listening again
         b_handler_port.startListening()
-        # wait again
+        not_recieve_data_end_time = int(time.time())
+
+
         with cv:
-            print 'Second wait'
             cv.wait(self.interval * 2)
-
-        assert len(blueflood_handler.data) == 2
-        second_POST_data = blueflood_handler.data[1][3]
-
-        first_data = self._parse_data_into_metrics(first_POST_data)
-        second_data = self._parse_data_into_metrics(second_POST_data)
-        # assert first_data times are in second_data too
-        keys1 = set(first_data.keys())
-        keys2 = set(second_data.keys())
-        # select random key
-        key = (keys1 & keys2).pop()
-        print key
-        print first_data[key]
-        print second_data[key]
-        for collectionTime in first_data[key]:
-            assert collectionTime in set(second_data[key])
+        assert len(blueflood_handler.data) == 1
+        
+        data = self._parse_data_into_metrics(blueflood_handler.data[0][3])
+        times = data[collectdconf.test_metric_name]
+        for collectionTime in times:
+            if not_recieve_data_start_time <= int(collectionTime * 0.001)\
+             <= not_recieve_data_end_time:
+                # as soon as we find _ANY_ point that fits 'rejecting' interval
+                # we stop cause it proves we're been supplied with data from
+                # 'rejecting' interval
+                return
+        # if we did not exit before, fail
         assert False
         
 
