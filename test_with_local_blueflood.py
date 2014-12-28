@@ -44,17 +44,20 @@ def authenticate(url, user, key):
     tenant = resp['access']['token']['tenant']['id']
     return tenant, token
 
-t = None 
 b_handler = None
-b_endpoint = None
+b_handler_port = None 
 a_handler = None
 reb_handler = None
 error_handler = None
 
+def setup_listnening_port(data):
+    global b_handler_port
+    b_handler_port = data
+
 def setup_module(module):
     """ setup any state specific to the execution of the given module."""
     
-    global b_handler, b_endpoint, a_handler, reb_handler, err_handler, t
+    global b_handler, a_handler, reb_handler, err_handler, t
     # blueflood server mock
     b_handler = http_server_mock.MockServerHandler()
     # auth server mock
@@ -64,7 +67,7 @@ def setup_module(module):
     # blueflood handler sending 500 responses
     err_handler = http_server_mock.Mock500ServerHandler()
 
-    b_endpoint = endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
+    endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler)).addCallback(setup_listnening_port)
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
     endpoints.serverFromString(reactor, "tcp:8002").listen(server.Site(reb_handler))
     endpoints.serverFromString(reactor, "tcp:8003").listen(server.Site(err_handler))
@@ -305,7 +308,7 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
 
 class TestErrorBluefloodNoAuth(TestRunCollectd):
     URL = 'http://localhost:8000'
-    AuthURL = 'http://localhost:8004'
+    AuthURL = ''
     tenantid = 'tenant-id'
 
     def _parse_data_into_metrics(self, data):
@@ -321,7 +324,7 @@ class TestErrorBluefloodNoAuth(TestRunCollectd):
         return return_dict
 
     def test_error_response(self, blueflood_handler, collectd):
-        global b_endpoint
+        global b_endpoint, b_handler_port
 
         cv = blueflood_handler.cv
 
@@ -329,28 +332,34 @@ class TestErrorBluefloodNoAuth(TestRunCollectd):
             print 'First wait'
             cv.wait(self.interval * 2)
         # now stop server to make sure write_blueflood plugin fails with delivery
-        print 'stoppping'
-        b_endpoint.stopListening()
+        assert len(blueflood_handler.data) == 1
+        first_POST_data = blueflood_handler.data[0][3]
+        b_handler_port.stopListening()
+        pytest.set_trace()
         # wait for next data send
-        print 'sleeping'
-        time.sleep(self.interval)
+        time.sleep(self.interval * 2)
         # start listening again
-        print 'start again'
-        b_endpoint = endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
+        b_handler_port.startListening()
         # wait again
         with cv:
             print 'Second wait'
             cv.wait(self.interval * 2)
 
-        first_data = self._parse_data_into_metrics(blueflood_handler.data[0][3])
-        second_data = self._parse_data_into_metrics(blueflood_handler.data[1][3])
+        assert len(blueflood_handler.data) == 2
+        second_POST_data = blueflood_handler.data[1][3]
+
+        first_data = self._parse_data_into_metrics(first_POST_data)
+        second_data = self._parse_data_into_metrics(second_POST_data)
         # assert first_data times are in second_data too
         keys1 = set(first_data.keys())
         keys2 = set(second_data.keys())
         # select random key
         key = (keys1 & keys2).pop()
-        for time in first_data[key]:
-            assert time in set(second_data[key])
+        print key
+        print first_data[key]
+        print second_data[key]
+        for collectionTime in first_data[key]:
+            assert collectionTime in set(second_data[key])
         assert False
         
 
@@ -360,31 +369,24 @@ class TestBluefloodWithAuth(TestRunCollectd):
     user = collectdconf.rax_user
     password = collectdconf.rax_key
 
-    def test_blueflood_ingest(self):
-        p = run_collectd_async(collectd_conf)
-        try:
-            tenantid, token = authenticate(self.AuthURL, self.user, self.password)
-            server = BluefloodEndpoint()
-            server.tenant = tenantid.encode()
-            server.headers = {'X-Auth-Token': token.encode()}
-            server.ingest_url = collectdconf.rax_url
-            server.retrieve_url = 'https://global.metrics.api.rackspacecloud.com'
+    def test_blueflood_ingest(self, collectd):
+        tenantid, token = authenticate(self.AuthURL, self.user, self.password)
+        server = BluefloodEndpoint()
+        server.tenant = tenantid.encode()
+        server.headers = {'X-Auth-Token': token.encode()}
+        server.ingest_url = collectdconf.rax_url
+        server.retrieve_url = 'https://global.metrics.api.rackspacecloud.com'
 
-            resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000))
-            count_before = len(resp['values'])
+        resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000))
+        count_before = len(resp['values'])
 
-            # wait for some time for collectd to write data to Blueflood
-            time.sleep(15)
-            
-            resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000))
-            count_after = len(resp['values'])
-            assert count_after > count_before, resp
-            assert count_after != 0
-        finally:
-            p.terminate()
-            print 'Waiting for collectd to terminate'
-            p.wait()
-            assert p.returncode == 0
+        # wait for some time for collectd to write data to Blueflood
+        time.sleep(self.interval * 3 + 1)
+        
+        resp = server.retrieve_resolution(collectdconf.test_metric_name, 0, int(time.time()*1000))
+        count_after = len(resp['values'])
+        assert count_after > count_before, resp
+        assert count_after != 0
 
 class TestBluefloodReauth(TestRunCollectd):
     URL = 'http://localhost:8002'
@@ -397,13 +399,13 @@ class TestBluefloodReauth(TestRunCollectd):
 
         print 'Waiting #1'
         with cv:
-            cv.wait()
+            cv.wait(self.interval * 2)
         # assert auth server hit
         assert len(a_handler.data) == 1
 
         print 'Waiting #2'
         with cv:
-            cv.wait()
+            cv.wait(self.interval * 2)
         # assert auth server wasn't hit yet
         assert len(a_handler.data) == 2
         assert len(reb_handler.data) == 3
