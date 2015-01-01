@@ -144,8 +144,12 @@ def collectd(request):
             stop_time = time.time()
         p.terminate()
         print 'Waiting process to terminate'
+        watchdog_timer = threading.Timer(5.0, p.kill, [p])
+        watchdog_timer.start()
         p.wait()
+        watchdog_timer.cancel()
         assert p.returncode == 0
+
     request.addfinalizer(fin)
     return p
 
