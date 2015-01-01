@@ -14,61 +14,43 @@ class MockServerHandler(resource.Resource):
         # super(BluefloodServerHandler, self).__init__(self)
         self.cv = cv
         self.data = []
-        self.response = ''
+        self.reply = []
+        self.default_reply = (200, '', {})
 
-    def render_GET(self, request):
-        request.setHeader("content-type", "text/plain")
-        if self.cv:
-            with self.cv:
-                self.cv.notify()
-        return ''
+    def should_reply_once(self, status, response, headers):
+        self.reply.append((status, response, headers))
+
+    def should_reply_forever(self, status, response, headers):
+        self.default_reply = (status, response, headers)
+
+    def _get_next_reply(self):
+        code, response, headers = self.reply[0] if self.reply else self.default_reply
+        try:
+            del self.reply[0]
+        except IndexError:
+            pass
+        return code, response, headers
+
 
     def render_POST(self, request):
-        request.setHeader('Content-type', 'application/json')
-        print request.path, self, time.time()
-        print dict(request.received_headers)
         data = request.content.read()
-        print len(data)
-        print ''
+        self.data += [(time.time(), dict(request.received_headers), request.path, data)]
         if self.cv:
             with self.cv:
-                self.data += [(time.time(), dict(request.received_headers), request.path, data)]
                 self.cv.notify()
-        else:
-            self.data += [(time.time(), dict(request.received_headers), request.path, data)]
 
-        return self.response
-
-class Mock401ServerHandler(MockServerHandler):
-    "Handler responses with 401 every 'self.frequency' time"
-    isLeaf = True
-
-    def __init__(self):
-        MockServerHandler.__init__(self)
-        self.count = 1
-        self.frequency = 3
-
-    def render_POST(self, request):
-        resp = MockServerHandler.render_POST(self, request)
-        code = 200 if self.count % self.frequency else 401
-        self.count += 1
+        code, response, headers = self._get_next_reply()
         request.setResponseCode(code)
-        return resp
-
-class Mock500ServerHandler(Mock401ServerHandler):
-    def render_POST(self, request):
-        resp = MockServerHandler.render_POST(self, request)
-        resp = resp if self.count % self.frequency else ''
-        self.count += 1
-        return resp
+        for key, value in headers.items():
+            request.setHeader(key, value)
+        return response
 
 if __name__ == '__main__':
     b_handler = MockServerHandler()
     a_handler = MockServerHandler()
-    reauth_blue_handler = Mock401ServerHandler()
-    error_blue_handler = Mock500ServerHandler()
-    a_handler.response = """{"access":{"token":{"id":"eb5e1d9287054898a55439137ea68675","expires":"2014-12-14T22:54:49.574Z","tenant":{"id":"836986","name":"836986"}}}}"""
+    response = """{"access":{"token":{"id":"eb5e1d9287054898a55439137ea68675","expires":"2014-12-14T22:54:49.574Z","tenant":{"id":"836986","name":"836986"}}}}"""
     endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
-    endpoints.serverFromString(reactor, "tcp:8002").listen(server.Site(reauth_blue_handler))
+    a_handler.should_reply_forever(200, response, {})
+    b_handler.should_reply_forever(200, '', {})
     reactor.run()
