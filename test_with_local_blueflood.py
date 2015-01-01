@@ -104,12 +104,15 @@ class TestRunCollectd:
     <URL "%(URL)s">
         TenantId    "%(tenantid)s"
         ttlInSeconds %(ttl)d
+        %(auth_template)s
+    </URL>
+</Plugin>
+'''
+        write_blueflood_auth_template = '''
         <AuthURL     "%(AuthURL)s">
             User        "%(user)s"
             Password    "%(password)s"
         </AuthURL>
-    </URL>
-</Plugin>
 '''
 
         with open(collectd_conf, 'w') as wfile:
@@ -119,12 +122,14 @@ class TestRunCollectd:
                     'plugin_dir': collectdconf.collectd_plugin_dir,
                     'types_file': collectdconf.collectd_types_file
                 })
-
-            wfile.write(write_blueflood_template % {
-                    'URL': getattr(cls, 'URL', ''),
+            auth_template = write_blueflood_auth_template % {
                     'AuthURL': getattr(cls, 'AuthURL', ''),
                     'user': getattr(cls, 'user', ''),
-                    'password': getattr(cls, 'password', ''),
+                    'password': getattr(cls, 'password', '')
+            }
+            wfile.write(write_blueflood_template % {
+                    'URL': getattr(cls, 'URL', ''),
+                    'auth_template': auth_template if getattr(cls, 'AuthURL', '') else '',
                     'tenantid': getattr(cls, 'tenantid', 'tenant-id'),
                     'ttl': getattr(cls, 'ttl', 600),
                     'interval': getattr(cls, 'interval', 5)
