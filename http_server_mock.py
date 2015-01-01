@@ -23,6 +23,9 @@ class MockServerHandler(resource.Resource):
     def should_reply_forever(self, status, response, headers):
         self.default_reply = (status, response, headers)
 
+    def reset_to_default_reply(self):
+        self.reply = []
+
     def _get_next_reply(self):
         code, response, headers = self.reply[0] if self.reply else self.default_reply
         try:
@@ -35,6 +38,8 @@ class MockServerHandler(resource.Resource):
     def render_POST(self, request):
         data = request.content.read()
         self.data += [(time.time(), dict(request.received_headers), request.path, data)]
+        print self.data[-1]
+        print ''
         if self.cv:
             with self.cv:
                 self.cv.notify()
@@ -52,5 +57,4 @@ if __name__ == '__main__':
     endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler))
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
     a_handler.should_reply_forever(200, response, {})
-    b_handler.should_reply_forever(200, '', {})
     reactor.run()

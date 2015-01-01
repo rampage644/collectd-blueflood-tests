@@ -3,6 +3,7 @@
 import json
 import pytest
 import SocketServer
+import socket
 import subprocess
 import threading
 import time
@@ -47,7 +48,6 @@ def authenticate(url, user, key):
 b_handler = None
 b_handler_port = None 
 a_handler = None
-reb_handler = None
 
 def setup_listnening_port(data):
     global b_handler_port
@@ -61,15 +61,9 @@ def setup_module(module):
     b_handler = http_server_mock.MockServerHandler()
     # auth server mock
     a_handler = http_server_mock.MockServerHandler()
-    # blueflood mock sending 401 responses (for _re_auth scenario testing)
-    reb_handler = http_server_mock.Mock401ServerHandler()
-    # blueflood handler sending 500 responses
-    err_handler = http_server_mock.Mock500ServerHandler()
 
     endpoints.serverFromString(reactor, "tcp:8000").listen(server.Site(b_handler)).addCallback(setup_listnening_port)
     endpoints.serverFromString(reactor, "tcp:8001").listen(server.Site(a_handler))
-    endpoints.serverFromString(reactor, "tcp:8002").listen(server.Site(reb_handler))
-    endpoints.serverFromString(reactor, "tcp:8003").listen(server.Site(err_handler))
 
     t = threading.Thread(target=reactor.run, args=(0, ))
     t.daemon = True
@@ -79,14 +73,14 @@ def teardown_module(module):
     """ teardown any state that was previously setup with a setup_module
     method.
     """
-    global b_handler, a_handler, reb_handler, t
+    global b_handler, a_handler, t
 
     reactor.stop()
     t = None
 
 class TestRunCollectd:
-    URL = ''
-    AuthURL = ''
+    URL = 'http://localhost:8000'
+    AuthURL = 'http://localhost:8001'
     interval = 10
 
     @classmethod
@@ -139,7 +133,15 @@ class TestRunCollectd:
 @pytest.fixture
 def collectd(request):
     p = run_collectd_async(collectd_conf)
+    minimum_run_time = 1
+    start_time = time.time()
     def fin():
+        stop_time = time.time()
+        # wait collectd to run for minimum time
+        # needed for proper signal handling
+        while stop_time - start_time < minimum_run_time:
+            time.sleep(0.1)
+            stop_time = time.time()
         p.terminate()
         print 'Waiting process to terminate'
         p.wait()
@@ -153,21 +155,11 @@ def blueflood_handler(request):
     cv = threading.Condition()
     b_handler.cv = cv
     def fin():
+        b_handler.reset_to_default_reply()
         b_handler.cv = None
         b_handler.data = []
     request.addfinalizer(fin)
     return b_handler
-
-@pytest.fixture
-def blueflood401_handler(request):
-    global reb_handler
-    cv = threading.Condition()
-    reb_handler.cv = cv
-    def fin():
-        reb_handler.cv = None
-        reb_handler.data = []
-    request.addfinalizer(fin)
-    return reb_handler
 
 @pytest.fixture
 def auth_handler(request):
@@ -175,6 +167,7 @@ def auth_handler(request):
     cv = threading.Condition()
     a_handler.cv = cv
     def fin():
+        a_handler.reset_to_default_reply()
         a_handler.cv = None
         a_handler.data = []
     request.addfinalizer(fin)
@@ -182,16 +175,15 @@ def auth_handler(request):
 
 
 class TestRunCollectdLocalMocks(TestRunCollectd):
-    URL = 'http://localhost:8000'
-    AuthURL = 'http://localhost:8001'
     user = 'user1'
     password = 'pass2'
     response = """{"access":{"token":{"id":"eb5e1d9287054898a55439137ea68675","expires":"2014-12-14T22:54:49.574Z","tenant":{"id":"836986","name":"836986"}}}}"""
     interval = 10
+    tenantid = 'tenant-id'
 
     def test_auth_is_done(self, blueflood_handler, auth_handler, collectd):
         acv = auth_handler.cv
-        auth_handler.response = self.response
+        auth_handler.should_reply_forever(200, self.response, {})
         bcv = blueflood_handler.cv
         blueflood_data = ''
 
@@ -207,7 +199,7 @@ class TestRunCollectdLocalMocks(TestRunCollectd):
 
         assert 'X-Auth-Token'.lower() in b_handler.data[0][1]
         assert b_handler.data[0][1]['X-Auth-Token'.lower()] == json.loads(self.response)['access']['token']['id']
-        assert b_handler.data[0][2] == '/v2.0/' + json.loads(self.response)['access']['token']['tenant']['id'] + '/ingest'
+        assert b_handler.data[0][2] == '/v2.0/' + self.tenantid + '/ingest'
         blueflood_data = json.loads(b_handler.data[0][3])
         assert type(blueflood_data) == list
         for element in blueflood_data:
@@ -228,6 +220,12 @@ class TestRunWithBluefloodNoAuth(TestRunCollectd):
     tenantid = 'tenant-id'
 
     def test_blueflood_ingest(self, collectd):
+        try:
+            blueflood_socket = socket.socket()
+            blueflood_socket.connect(*urllib2.splitport(self.URL))
+        except:
+            pytest.skip()
+
         server = BluefloodEndpoint()
         server.tenant = self.tenantid
 
@@ -244,7 +242,6 @@ class TestRunWithBluefloodNoAuth(TestRunCollectd):
 
 
 class TestMockBluefloodNoAuth(TestRunCollectd):
-    URL = 'http://localhost:8000'
     AuthURL = ''
     tenantid = 'tenant-id'
     interval = 5
@@ -297,7 +294,6 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
             prev_time = time
 
 class TestErrorBluefloodNoAuth(TestRunCollectd):
-    URL = 'http://localhost:8000'
     AuthURL = ''
     tenantid = 'tenant-id'
 
@@ -352,6 +348,7 @@ class TestBluefloodWithAuth(TestRunCollectd):
     AuthURL = collectdconf.rax_auth_url
     user = collectdconf.rax_user
     password = collectdconf.rax_key
+    tenantid = '836986'
 
     def test_blueflood_ingest(self, collectd):
         tenantid, token = authenticate(self.AuthURL, self.user, self.password)
@@ -373,13 +370,14 @@ class TestBluefloodWithAuth(TestRunCollectd):
         assert count_after != 0
 
 class TestBluefloodReauth(TestRunCollectd):
-    URL = 'http://localhost:8002'
-    AuthURL = 'http://localhost:8001'
     response = """{"access":{"token":{"id":"eb5e1d9287054898a55439137ea68675","expires":"2014-12-14T22:54:49.574Z","tenant":{"id":"836986","name":"836986"}}}}"""
     interval = 5
 
-    def test_reauth(self, blueflood401_handler, auth_handler, collectd):
-        auth_handler.response = self.response
+    def test_reauth(self, blueflood_handler, auth_handler, collectd):
+        auth_handler.should_reply_forever(200, self.response, {})
+        blueflood_handler.should_reply_once(200, '', {})
+        blueflood_handler.should_reply_once(200, '', {})
+        blueflood_handler.should_reply_once(401, '', {})
         cv = auth_handler.cv
 
         print 'Waiting #1'
@@ -392,4 +390,4 @@ class TestBluefloodReauth(TestRunCollectd):
         with cv:
             cv.wait(self.interval * 4)
         assert len(a_handler.data) == 2
-        assert len(reb_handler.data) == 4
+        assert len(blueflood_handler.data) == 4
