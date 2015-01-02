@@ -22,18 +22,17 @@ collectd_conf_in = 'collectd.conf.in'
 collectd_conf = 'collectd.conf'
 TIMEOUT = 0.5
 
-
-def run_collectd(conf, wait=TIMEOUT):
+def run_collectd_async(conf):
     p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf], 
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return p
+
+def run_collectd(conf, wait=TIMEOUT):
+    p = run_collectd_async(conf)
     time.sleep(TIMEOUT)
     p.terminate()
     return p.communicate(), p.returncode
 
-def run_collectd_async(conf, cv=None):
-    p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf], 
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return p
 
 def authenticate(url, user, key):
     adata = '{"auth": {"RAX-KSKEY:apiKeyCredentials": {"username": "%s", "apiKey": "%s"}}}' % (user, key)
@@ -153,29 +152,25 @@ def collectd(request):
     request.addfinalizer(fin)
     return p
 
+def setup_and_teardown_handler(request, handler):
+    cv = threading.Condition()
+    handler.cv = cv
+    def fin():
+        handler.reset_to_default_reply()
+        handler.cv = None
+        handler.data = []
+    request.addfinalizer(fin)
+    return handler
+
 @pytest.fixture
 def blueflood_handler(request):
     global b_handler
-    cv = threading.Condition()
-    b_handler.cv = cv
-    def fin():
-        b_handler.reset_to_default_reply()
-        b_handler.cv = None
-        b_handler.data = []
-    request.addfinalizer(fin)
-    return b_handler
+    return setup_and_teardown_handler(request, b_handler)
 
 @pytest.fixture
 def auth_handler(request):
     global a_handler
-    cv = threading.Condition()
-    a_handler.cv = cv
-    def fin():
-        a_handler.reset_to_default_reply()
-        a_handler.cv = None
-        a_handler.data = []
-    request.addfinalizer(fin)
-    return a_handler
+    return setup_and_teardown_handler(request, a_handler)
 
 
 class TestRunCollectdLocalMocks(TestRunCollectd):
