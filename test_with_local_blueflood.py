@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import json
 import pytest
 import SocketServer
@@ -21,6 +22,11 @@ from twisted.web import server
 collectd_conf_in = 'collectd.conf.in'
 collectd_conf = 'collectd.conf'
 TIMEOUT = 0.5
+
+b_handler = None
+b_handler_port = None 
+a_handler = None
+
 
 def run_collectd_async(conf):
     p = subprocess.Popen([collectdconf.collectd_bin, '-f', '-C', conf], 
@@ -44,9 +50,13 @@ def authenticate(url, user, key):
     tenant = resp['access']['token']['tenant']['id']
     return tenant, token
 
-b_handler = None
-b_handler_port = None 
-a_handler = None
+def send_to_unixsocket(path, data):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(path)
+    sock.sendall(data)
+    resp = sock.recv(1024)
+    sock.close()
+    return resp
 
 def setup_listnening_port(data):
     global b_handler_port
@@ -77,10 +87,12 @@ def teardown_module(module):
     reactor.stop()
     t = None
 
+
 class TestRunCollectd:
     URL = 'http://localhost:8000'
     AuthURL = 'http://localhost:8001'
     interval = 10
+    load_plugins = ['cpu', 'load', 'memory']
 
     @classmethod
     def setup_class(cls):
@@ -107,6 +119,7 @@ class TestRunCollectd:
             Password    "%(password)s"
         </AuthURL>
 '''
+        load_plugin_template = '''LoadPlugin %(plugin)s\n'''
 
         with open(collectd_conf, 'w') as wfile:
             wfile.write(template % {
@@ -115,6 +128,8 @@ class TestRunCollectd:
                     'plugin_dir': collectdconf.collectd_plugin_dir,
                     'types_file': collectdconf.collectd_types_file
                 })
+            for plugin in getattr(cls, 'load_plugins', []):
+                wfile.write(load_plugin_template % {'plugin': plugin})
             auth_template = write_blueflood_auth_template % {
                     'AuthURL': getattr(cls, 'AuthURL', ''),
                     'user': getattr(cls, 'user', ''),
@@ -256,7 +271,6 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
         assert len(handler.data) == 1
         assert 'X-Auth-Token'.lower() not in handler.data[0][1]
         assert handler.data[0][2] == '/v2.0/' + self.tenantid + '/ingest'
-        print handler.data
         blueflood_data = json.loads(handler.data[0][3])
         assert type(blueflood_data) == list
         for element in blueflood_data:
@@ -291,6 +305,42 @@ class TestMockBluefloodNoAuth(TestRunCollectd):
             print prev_time, time, (time - prev_time), 
             assert float(self.interval) * (1 - 0.01) < abs(time - prev_time) < float(self.interval) * (1 + 0.01)
             prev_time = time
+
+
+class TestNotification(TestRunCollectd):
+    AuthURL = ''
+    tenantid = 'tenant-id'
+    interval = 5
+    load_plugins = []
+    
+    def test_notification_arrives(self, blueflood_handler, collectd):
+        cv = blueflood_handler.cv
+        handler = blueflood_handler
+
+        socket_path = os.path.join(collectdconf.collectd_base_dir, 'collectd-unixsock')
+        while not os.path.exists(socket_path):
+            time.sleep(0.1)
+        message = 'PUTNOTIF time=%(time)d severity=%(severity)s host=%(host)s plugin=%(plugin)s type=%(type)s message=\"%(msg)s\"\n'
+        plugin_name = 'plugin'
+        type_name = 'type'
+        message_text = 'testing, testing'
+        data = message % {
+                'time': time.time(),
+                'severity': 'failure',
+                'host': socket.gethostname(),
+                'plugin': plugin_name,
+                'type': type_name,
+                'msg': message_text
+            }
+        send_to_unixsocket(socket_path, data)
+
+        with cv:
+            cv.wait(self.interval * 2)
+        assert len(handler.data) == 1
+        data = json.loads(handler.data[0][3])
+        assert data[0]['metricName'] == '.'.join([socket.gethostname(), plugin_name, type_name, 'FAILURE'])
+        assert data[0]['metricValue'] == message_text
+
 
 class TestErrorBluefloodNoAuth(TestRunCollectd):
     AuthURL = ''

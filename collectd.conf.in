@@ -13,6 +13,10 @@ Interval 5
 	PrintSeverity true
 </Plugin>
 
-LoadPlugin cpu
-LoadPlugin load
-LoadPlugin memory
+LoadPlugin unixsock
+<Plugin unixsock>
+    SocketFile "%(base_dir)s/collectd-unixsock"
+    SocketGroup "users"
+    SocketPerms "0660"
+    DeleteSocket true
+</Plugin>
