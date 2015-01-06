@@ -82,7 +82,7 @@ def teardown_module(module):
     """ teardown any state that was previously setup with a setup_module
     method.
     """
-    global b_handler, a_handler, t
+    global t
 
     reactor.stop()
     t = None
@@ -96,8 +96,6 @@ class TestRunCollectd:
 
     @classmethod
     def setup_class(cls):
-        global a_handler, b_handler
-        # base collectd settings
         template = open(collectd_conf_in, 'r').read()
         # load write plugin
         write_blueflood_template = '''
@@ -119,7 +117,6 @@ class TestRunCollectd:
             Password    "%(password)s"
         </AuthURL>
 '''
-        load_plugin_template = '''LoadPlugin %(plugin)s\n'''
 
         with open(collectd_conf, 'w') as wfile:
             wfile.write(template % {
@@ -128,16 +125,20 @@ class TestRunCollectd:
                     'plugin_dir': collectdconf.collectd_plugin_dir,
                     'types_file': collectdconf.collectd_types_file
                 })
+            
+            load_plugin_template = '''LoadPlugin %(plugin)s\n'''
             for plugin in getattr(cls, 'load_plugins', []):
                 wfile.write(load_plugin_template % {'plugin': plugin})
-            auth_template = write_blueflood_auth_template % {
+
+            auth_settings = write_blueflood_auth_template % {
                     'AuthURL': getattr(cls, 'AuthURL', ''),
                     'user': getattr(cls, 'user', ''),
                     'password': getattr(cls, 'password', '')
             }
+
             wfile.write(write_blueflood_template % {
                     'URL': getattr(cls, 'URL', ''),
-                    'auth_template': auth_template if getattr(cls, 'AuthURL', '') else '',
+                    'auth_template': auth_settings if getattr(cls, 'AuthURL', '') else '',
                     'tenantid': getattr(cls, 'tenantid', 'tenant-id'),
                     'ttl': getattr(cls, 'ttl', 600),
                     'interval': getattr(cls, 'interval', 5)
